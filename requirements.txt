@@ -1,0 +1,4 @@
+# Bibliotecas usadas (a Vercel instala tudo isso no deploy)
+flask          # framework web: cria as rotas e entrega a página
+scikit-learn   # machine learning: TF-IDF + Regressão Logística
+numpy          # contas com vetores (dependência do scikit-learn, também usada no app.py)

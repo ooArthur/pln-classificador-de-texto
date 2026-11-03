@@ -1,0 +1,91 @@
+<!doctype html>
+<!-- ============================================================
+     Página do classificador de texto (servida pelo Flask em app.py).
+     Fluxo: o usuário digita -> o JavaScript envia o texto para
+     /api/classificar -> o Python responde em JSON -> a página mostra
+     a categoria, as probabilidades e as palavras que pesaram.
+     ============================================================ -->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classificador de Texto</title>
+<style>
+/* Cores em variáveis (:root). O bloco prefers-color-scheme troca para o tema escuro. */
+:root{--bg:#f6f7fb;--card:#fff;--ink:#1c2033;--mute:#667;--line:#e3e6ef;--spam:#d9480f;--noticia:#1c7ed6;--suporte:#2f9e44;--accent:#4c3fd0}
+@media (prefers-color-scheme:dark){:root{--bg:#12141f;--card:#1b1e2e;--ink:#eceefb;--mute:#9aa0bd;--line:#2c3047;--spam:#ff8a5c;--noticia:#5aa9ff;--suporte:#5fd47a;--accent:#8f86ff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:32px 16px 48px}
+h1{font-size:1.7rem;margin:0 0 4px}.sub{color:var(--mute);margin:0 0 24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+textarea{width:100%;min-height:110px;border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;background:var(--bg);color:var(--ink);resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+button{font:inherit;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;cursor:pointer}
+button.main{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.pipe{display:flex;flex-wrap:wrap;gap:6px;font-size:.85rem;color:var(--mute);margin:0 0 16px;padding:0;list-style:none}
+.pipe li{border:1px solid var(--line);border-radius:999px;padding:2px 10px}.pipe li+li::before{content:"→ ";}
+.res{font-size:1.5rem;font-weight:700}.bar{height:12px;border-radius:6px;background:var(--line);overflow:hidden;margin:4px 0 10px}
+.bar>i{display:block;height:100%}.lbl{display:flex;justify-content:space-between;font-size:.9rem}
+code{background:var(--bg);padding:2px 6px;border-radius:6px;font-size:.9rem}
+.chip{display:inline-block;margin:2px 4px 2px 0;padding:2px 10px;border-radius:999px;background:var(--bg);border:1px solid var(--line);font-size:.9rem}
+.err{color:var(--spam)}.mute{color:var(--mute);font-size:.9rem}[hidden]{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Classificador de Texto</h1>
+<p class="sub">Spam · Notícia · Suporte — TF-IDF + Regressão Logística. Projeto de PLN, Arthur Almeida.</p>
+<ul class="pipe" aria-label="Pipeline"><li>Texto original</li><li>Limpeza</li><li>TF-IDF</li><li>Modelo decide</li><li>Resposta</li></ul>
+
+<section class="card">
+<label for="t"><strong>Digite um texto em português</strong></label>
+<textarea id="t" maxlength="2000" placeholder="Ex.: Não consigo acessar minha conta..."></textarea>
+<div class="row">
+<button class="main" id="go">Classificar</button>
+<span class="mute">Exemplos:</span>
+<button data-ex="Parabéns! Você ganhou um prêmio de 5 mil reais. Clique no link agora">Spam</button>
+<button data-ex="O Senado aprovou nesta terça o projeto que muda as regras do orçamento">Notícia</button>
+<button data-ex="Meu aplicativo trava ao abrir e preciso de ajuda para resolver o erro">Suporte</button>
+</div>
+<p id="err" class="err" role="alert" hidden></p>
+</section>
+
+<section class="card" id="out" hidden aria-live="polite">
+<div class="mute">Categoria prevista</div>
+<div class="res" id="cat"></div>
+<p id="low" class="mute" hidden>Confiança baixa: o texto tem poucas palavras que o modelo conhece. Trate o resultado com cautela.</p>
+<div id="bars" style="margin-top:12px"></div>
+<p><strong>Por que essa resposta?</strong> Termos que mais pesaram:</p>
+<div id="why"></div>
+<p class="mute" style="margin-bottom:0">Texto após a limpeza: <code id="clean"></code></p>
+</section>
+
+<p class="mute" id="info"></p>
+</main>
+<script>
+// $ = atalho para document.getElementById; cor = cor de cada categoria
+const $=id=>document.getElementById(id),cor={Spam:"--spam","Notícia":"--noticia",Suporte:"--suporte"};
+document.querySelectorAll("[data-ex]").forEach(b=>b.onclick=()=>{$("t").value=b.dataset.ex;go()});
+$("go").onclick=go;
+// Envia o texto para a API Python (POST /api/classificar) e desenha o resultado
+async function go(){
+  const err=$("err");err.hidden=true;
+  const r=await fetch("/api/classificar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({texto:$("t").value})});
+  const d=await r.json();
+  if(!r.ok){err.textContent=d.erro||"Erro";err.hidden=false;$("out").hidden=true;return}
+  $("out").hidden=false;$("cat").textContent=d.categoria+" ("+Math.round(d.confianca*100)+"%)";
+  $("low").hidden=!(d.confianca<0.5||d.vocabulario_reconhecido===0);
+  $("cat").style.color=`var(${cor[d.categoria]})`;
+  $("bars").replaceChildren(...Object.entries(d.probabilidades).map(([k,v])=>{
+    const w=document.createElement("div");
+    w.innerHTML=`<div class="lbl"><span></span><span>${(v*100).toFixed(1)}%</span></div><div class="bar"><i style="width:${v*100}%;background:var(${cor[k]})"></i></div>`;
+    w.querySelector("span").textContent=k;return w}));
+  $("why").replaceChildren(...(d.explicacao.length?d.explicacao.map(e=>{const s=document.createElement("span");s.className="chip";s.textContent=e.termo;return s}):[Object.assign(document.createElement("span"),{className:"mute",textContent:"Nenhum termo conhecido pelo modelo no texto."})]));
+  $("clean").textContent=d.limpo;
+}
+// Mostra no rodapé quantos exemplos o modelo viu e a acurácia (vem de /api/info)
+fetch("/api/info").then(r=>r.json()).then(i=>$("info").textContent=`Modelo treinado com ${i.exemplos} exemplos; acurácia em validação cruzada (5 folds): ${(i.acuracia_cv*100).toFixed(0)}%. Corpus pequeno e didático.`);
+</script>
+</body>
+</html>
